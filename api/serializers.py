@@ -327,9 +327,24 @@ class UserProfileSerializer(CountryFieldMixin, serializers.ModelSerializer):
 
 
 class ContactSerializer(serializers.ModelSerializer):
+    phone_number = serializers.CharField(
+        required=False, allow_blank=True, write_only=True
+    )
+
     class Meta:
         model = ContactMessage
-        fields = ["email", "subject", "message"]
+        fields = ["email", "subject", "message", "phone_number"]
+
+    def validate_phone_number(self, value):
+        if value.strip():
+            raise serializers.ValidationError(
+                "Spam detected. Please leave this field blank."
+            )
+        return value
+
+    def create(self, validated_data):
+        validated_data.pop("phone_number", None)
+        return super().create(validated_data)
 
 
 class PsychologyModelDraftSerializer(serializers.ModelSerializer):

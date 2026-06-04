@@ -1,4 +1,5 @@
 from django.urls import reverse
+from unittest.mock import patch
 from rest_framework.test import APITestCase
 from rest_framework import status
 
@@ -11,6 +12,7 @@ from psychology_models.models import (
     Variable,
     PsychologyModelDraft,
 )
+from contact.models import ContactMessage
 
 
 class PsychologyModelAPITest(APITestCase):
@@ -495,3 +497,46 @@ class PsychologyModelAPITest(APITestCase):
         url = f"/api/psychology_models/draft/{self.draft.id}/"
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ContactAPITest(APITestCase):
+    def setUp(self):
+        self.url = reverse("contact_message_create")
+        self.payload = {
+            "email": "sender@example.com",
+            "subject": "Test Subject",
+            "message": "This is a test message.",
+        }
+
+    @patch("api.views.send_contact_confirmation")
+    @patch("api.views.send_contact_notification")
+    def test_create_contact_message_allows_empty_honeypot(
+        self, mock_send_contact_notification, mock_send_contact_confirmation
+    ):
+        payload = {**self.payload, "phone_number": ""}
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ContactMessage.objects.count(), 1)
+        contact_message = ContactMessage.objects.get()
+        self.assertEqual(contact_message.email, payload["email"])
+        self.assertEqual(contact_message.subject, payload["subject"])
+        self.assertEqual(contact_message.message, payload["message"])
+        mock_send_contact_notification.assert_called_once_with(contact_message)
+        mock_send_contact_confirmation.assert_called_once_with(contact_message)
+
+    @patch("api.views.send_contact_confirmation")
+    @patch("api.views.send_contact_notification")
+    def test_create_contact_message_rejects_filled_honeypot(
+        self, mock_send_contact_notification, mock_send_contact_confirmation
+    ):
+        payload = {**self.payload, "phone_number": "123456789"}
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(ContactMessage.objects.count(), 0)
+        self.assertIn("phone_number", response.data)
+        mock_send_contact_notification.assert_not_called()
+        mock_send_contact_confirmation.assert_not_called()
